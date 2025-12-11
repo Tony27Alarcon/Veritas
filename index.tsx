@@ -10,9 +10,8 @@ import {
 } from 'lucide-react';
 
 // --- Configuration ---
-// Soporte híbrido: lee de process.env (entorno actual) o import.meta.env (Vite/Vercel)
-// En Vercel, la variable debe llamarse VITE_API_KEY
-const API_KEY = (import.meta as any).env?.VITE_API_KEY || process.env.API_KEY;
+// The API key must be obtained exclusively from the environment variable process.env.API_KEY.
+// Assume this variable is pre-configured, valid, and accessible.
 
 // --- Constants ---
 const MAX_DAILY_QUERIES = 20;
@@ -236,10 +235,7 @@ const TRANSLATIONS = {
 };
 
 // --- Gemini Client ---
-let ai: GoogleGenAI | null = null;
-if (API_KEY) {
-  ai = new GoogleGenAI({ apiKey: API_KEY });
-}
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
 // --- Components ---
 
@@ -326,7 +322,7 @@ interface ResultCardProps {
   inputContext?: React.ReactNode;
 }
 
-const ResultCard = ({ result, sources, t, isFirst, inputContext }: ResultCardProps) => {
+const ResultCard: React.FC<ResultCardProps> = ({ result, sources, t, isFirst, inputContext }) => {
     const getStatusColor = (verdict: string) => {
         switch (verdict) {
           case 'CREDIBLE': return 'border-emerald-500 text-emerald-700';
@@ -666,7 +662,6 @@ const App = () => {
   };
 
   const processAudioFile = async (file: MediaFile) => {
-    if (!ai) { setError(t.errorNoKey); return; }
     try {
         const response = await ai.models.generateContent({
              model: 'gemini-2.5-flash',
@@ -693,7 +688,6 @@ const App = () => {
   };
 
   const performDictation = async (base64Data: string, mimeType: string) => {
-    if (!ai) return;
     setIsTranscribing(true);
     try {
         const response = await ai.models.generateContent({
@@ -747,7 +741,6 @@ const App = () => {
   };
 
   const generateDynamicSteps = async (textInput: string, files: MediaFile[], url: string, targetLang: Language) => {
-    if (!ai) return;
     try {
       const mediaTypes = files.map(f => f.type).join(', ');
       let snippet = textInput ? `"${textInput.slice(0, 50)}..."` : '';
@@ -792,10 +785,6 @@ const App = () => {
 
     if (!text && mediaFiles.length === 0 && !urlInput) {
       setError(t.errorInput);
-      return;
-    }
-    if (!ai) {
-      setError(t.errorNoKey);
       return;
     }
 
@@ -940,7 +929,6 @@ const App = () => {
   const initializeChatWithContext = (res: VerificationResult) => {
       // Helper for history loading: creates a pseudo-session so follow-ups work.
       // We start a new chat but system prompt is key.
-      if (!ai) return;
       
       const languageName = language === 'es' ? 'Spanish' : language === 'pt' ? 'Portuguese' : 'English';
       const systemPrompt = `
