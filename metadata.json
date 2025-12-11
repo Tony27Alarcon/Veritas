@@ -1,0 +1,7 @@
+{
+  "description": "Detector integral de desinformación, deepfakes, intentos de estafa y phishing.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "name": "Veritas - Detector de Fraude Digital"
+}
