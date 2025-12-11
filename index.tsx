@@ -6,7 +6,7 @@ import {
   Video, Image as ImageIcon, ExternalLink, Printer, Share2, Check, 
   MessageSquare, Bot, Globe, RefreshCcw, Quote, FileSearch, Scale, 
   Fingerprint, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Feather, MailWarning, FileWarning, EyeOff,
-  Search, Info, MousePointerClick, FileText, Lock, Paperclip, Link, AudioLines, FileQuestion, History, Clock, Trash2
+  Search, Info, MousePointerClick, FileText, Lock, Paperclip, Link, AudioLines, FileQuestion, History, Clock, Trash2, Send
 } from 'lucide-react';
 
 // --- Configuration ---
@@ -61,7 +61,7 @@ interface ChatMessage {
 interface HistoryItem {
   id: string;
   timestamp: number;
-  result: VerificationResult;
+  result: VerificationResult; // Stores the PRIMARY result
   previewText: string;
   sources: Source[];
 }
@@ -119,7 +119,9 @@ const TRANSLATIONS = {
     limitTitle: "Límite Diario Alcanzado",
     limitMsg: `Has alcanzado el límite de ${MAX_DAILY_QUERIES} consultas diarias gratuitas.`,
     limitSubMsg: "Por favor, vuelve mañana para realizar más análisis.",
-    limitBtn: "Entendido"
+    limitBtn: "Entendido",
+    followUpPlaceholder: "Haga una pregunta para profundizar el análisis...",
+    followUpLoading: "Analizando nueva consulta..."
   },
   en: {
     title: "Veritas",
@@ -172,7 +174,9 @@ const TRANSLATIONS = {
     limitTitle: "Daily Limit Reached",
     limitMsg: `You have reached the limit of ${MAX_DAILY_QUERIES} free daily queries.`,
     limitSubMsg: "Please come back tomorrow for more analyses.",
-    limitBtn: "Understood"
+    limitBtn: "Understood",
+    followUpPlaceholder: "Ask a question to deepen the analysis...",
+    followUpLoading: "Analyzing new query..."
   },
   pt: {
     title: "Veritas",
@@ -225,12 +229,13 @@ const TRANSLATIONS = {
     limitTitle: "Limite Diário Atingido",
     limitMsg: `Você atingiu o limite de ${MAX_DAILY_QUERIES} consultas diárias gratuitas.`,
     limitSubMsg: "Por favor, volte amanhã para realizar mais análises.",
-    limitBtn: "Entendido"
+    limitBtn: "Entendido",
+    followUpPlaceholder: "Faça uma pergunta para aprofundar a análise...",
+    followUpLoading: "Analisando nova consulta..."
   }
 };
 
 // --- Gemini Client ---
-// Initialize lazily to prevent errors if key is missing on load
 let ai: GoogleGenAI | null = null;
 if (API_KEY) {
   ai = new GoogleGenAI({ apiKey: API_KEY });
@@ -254,7 +259,6 @@ const BookLoader = ({ label }: { label: string }) => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Helper to render text lines on a page
   const PageContent = () => (
     <div className="page-text">
        <div className="line"></div>
@@ -288,7 +292,6 @@ const BookLoader = ({ label }: { label: string }) => {
   );
 };
 
-// New Component: Score Meter
 const ScoreMeter = ({ score, t }: { score: number, t: any }) => {
   return (
     <div className="w-full">
@@ -298,29 +301,156 @@ const ScoreMeter = ({ score, t }: { score: number, t: any }) => {
           {score}/100
         </span>
       </div>
-      
-      {/* Bar Container */}
       <div className="h-4 w-full bg-gray-100 rounded-full relative overflow-hidden shadow-inner">
-        {/* Gradient Background */}
         <div className="absolute inset-0 bg-gradient-to-r from-rose-500 via-amber-300 to-emerald-500 opacity-80"></div>
-        
-        {/* Needle/Marker */}
         <div 
           className="absolute top-0 bottom-0 w-1.5 bg-black shadow-[0_0_10px_rgba(0,0,0,0.5)] transform -translate-x-1/2 transition-all duration-1000 ease-out z-10"
           style={{ left: `${score}%` }}
         ></div>
-
-        {/* Mask to simulate scanlines or texture (optional) */}
         <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent_50%,rgba(255,255,255,0.2)_50%)] bg-[length:4px_100%]"></div>
       </div>
-
-      {/* Axis Labels */}
       <div className="flex justify-between mt-2 text-[10px] font-mono font-medium text-gray-400 uppercase tracking-wider">
         <span>{t.scoreLow}</span>
         <span>{t.scoreHigh}</span>
       </div>
     </div>
   );
+};
+
+// Result Card Component (Extracted for reuse in the list)
+interface ResultCardProps {
+  result: VerificationResult;
+  sources: Source[];
+  t: any;
+  isFirst: boolean;
+  inputContext?: React.ReactNode;
+}
+
+const ResultCard = ({ result, sources, t, isFirst, inputContext }: ResultCardProps) => {
+    const getStatusColor = (verdict: string) => {
+        switch (verdict) {
+          case 'CREDIBLE': return 'border-emerald-500 text-emerald-700';
+          case 'SUSPICIOUS': return 'border-amber-500 text-amber-700';
+          case 'FAKE': return 'border-rose-500 text-rose-700';
+          case 'SATIRE': return 'border-violet-500 text-violet-700';
+          default: return 'border-gray-500 text-gray-700';
+        }
+    };
+
+    return (
+        <div className="bg-[#F5F5F7] p-8 md:p-16 shadow-2xl shadow-gray-300/50 relative border-t-[6px] border-black mb-12 animate-fade-in-up rounded-sm">
+             {/* Render Input Context only for the first card */}
+             {isFirst && inputContext && (
+                 <div className="mb-12 border-b-2 border-gray-200 pb-8">
+                    <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
+                       <FileQuestion size={14} /> {t.inputSummaryTitle}
+                    </h3>
+                    <div className="flex flex-col gap-6">
+                        {inputContext}
+                    </div>
+                 </div>
+             )}
+
+             {/* HEADER & VERDICT */}
+             <div className="flex flex-col md:flex-row gap-12 border-b-2 border-black pb-12 mb-12">
+                <div className="flex-1">
+                   <div className="flex items-center gap-3 mb-4">
+                      <Feather size={28} className="text-black" />
+                      <span className="serif text-3xl font-bold tracking-tight">Veritas</span>
+                   </div>
+                   <h2 className="font-mono text-xs font-bold text-gray-400 tracking-[0.2em] uppercase mb-4">{t.reportHeader}</h2>
+                   <div className="flex items-center gap-3">
+                      {result.verdict === 'CREDIBLE' ? <ShieldCheck size={32} className="text-emerald-600" /> : 
+                       result.verdict === 'FAKE' ? <AlertTriangle size={32} className="text-rose-600" /> : <Info size={32} className="text-amber-600" />}
+                      <span className={`text-4xl font-serif font-bold ${getStatusColor(result.verdict).split(' ')[1]}`}>
+                         {t.verdictLabels[result.verdict]}
+                      </span>
+                   </div>
+                </div>
+                <div className="flex-1 flex items-end">
+                   <ScoreMeter score={result.score} t={t} />
+                </div>
+             </div>
+             
+             {/* VERDICT SUMMARY */}
+             <div className="mb-12 bg-white p-8 border-l-4 border-black shadow-sm">
+                 <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-gray-500 mb-3">{t.summary}</h3>
+                 <p className="font-serif text-xl leading-relaxed italic text-gray-800">
+                    "{result.summary}"
+                 </p>
+             </div>
+
+             {/* EXTRACTED CONTENT */}
+             {result.extractedContent && (
+               <div className="mb-12">
+                  <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-gray-500 mb-4 flex items-center gap-2"><FileText size={14}/> {t.analyzedContent}</h3>
+                  <div className="bg-gray-50 border border-gray-200 p-6 rounded-md">
+                      <p className="font-serif italic text-gray-600 leading-relaxed text-sm">
+                        ...{result.extractedContent}...
+                      </p>
+                  </div>
+               </div>
+             )}
+
+             {/* DETAILS */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-16">
+                <div>
+                   <h4 className="font-mono text-xs font-bold uppercase tracking-widest border-b-2 border-gray-900 pb-3 mb-6 text-black">{t.claims}</h4>
+                   <div className="space-y-6">
+                      {result.claims.map((claim, idx) => (
+                         <div key={idx} className="group">
+                            <div className="flex items-start gap-3 mb-2">
+                               <div className={`mt-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${claim.isFact ? 'bg-emerald-500' : 'bg-rose-500'}`}>
+                                  {claim.isFact ? <Check size={10} /> : <X size={10} />}
+                               </div>
+                               <p className="font-medium text-gray-900 leading-snug">{claim.text}</p>
+                            </div>
+                            <p className="text-sm text-gray-500 pl-8 leading-relaxed group-hover:text-gray-900 transition-colors">{claim.assessment}</p>
+                         </div>
+                      ))}
+                   </div>
+                </div>
+                <div className="space-y-12">
+                   <div>
+                      <h4 className="font-mono text-xs font-bold uppercase tracking-widest border-b-2 border-gray-900 pb-3 mb-6 text-black">Análisis Técnico IA</h4>
+                      <div className="bg-white p-5 border border-gray-200 shadow-sm rounded-lg">
+                        <div className="flex items-center justify-between mb-3">
+                           <div className="flex items-center gap-2">
+                              <Sparkles size={16} className={result.isAiGenerated ? 'text-rose-500' : 'text-emerald-500'} />
+                              <span className="text-lg font-bold font-serif">{result.isAiGenerated ? t.aiDetected : t.aiClean}</span>
+                           </div>
+                           {result.isAiGenerated && <span className="font-mono text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded font-bold">Probabilidad: {result.aiConfidence}%</span>}
+                        </div>
+                        <p className="text-sm text-gray-600 leading-relaxed border-t border-gray-100 pt-3">{result.aiReasoning}</p>
+                      </div>
+                   </div>
+                   <div>
+                      <h4 className="font-mono text-xs font-bold uppercase tracking-widest border-b-2 border-gray-900 pb-3 mb-6 text-black">{t.sources}</h4>
+                      <ul className="space-y-3">
+                         {sources.map((s, i) => (
+                            <li key={i}>
+                               <a href={s.uri} target="_blank" rel="noreferrer" className="flex items-center gap-3 group bg-white p-3 border border-transparent hover:border-gray-200 hover:shadow-sm transition-all rounded-lg">
+                                  <div className="w-6 h-6 bg-gray-100 flex items-center justify-center rounded-full text-gray-400 group-hover:bg-black group-hover:text-white transition-colors">
+                                    <ArrowRight size={10} />
+                                  </div>
+                                  <span className="text-sm text-gray-600 group-hover:text-black font-medium truncate flex-1">{s.title}</span>
+                                  <ExternalLink size={12} className="text-gray-300 opacity-0 group-hover:opacity-100" />
+                               </a>
+                            </li>
+                         ))}
+                         {sources.length === 0 && <li className="text-sm text-gray-400 italic">No public sources found.</li>}
+                      </ul>
+                   </div>
+                </div>
+             </div>
+             
+             {/* Footer of Report */}
+             <div className="pt-8 border-t border-gray-200 flex justify-between items-center text-[10px] text-gray-400 font-mono uppercase tracking-widest">
+                <span className="flex items-center gap-2"><Fingerprint size={12} /> Generated by Veritas AI</span>
+                <span>Ref: {Math.random().toString(36).substr(2, 9).toUpperCase()}</span>
+             </div>
+        </div>
+    );
 };
 
 const App = () => {
@@ -342,20 +472,21 @@ const App = () => {
   const [error, setError] = useState<string | null>(null);
   const [dynamicSteps, setDynamicSteps] = useState<string[] | null>(null);
   
-  // Result States
-  const [result, setResult] = useState<VerificationResult | null>(null);
-  const [sources, setSources] = useState<Source[]>([]);
+  // Result States (Changed to Array for conversation flow)
+  const [results, setResults] = useState<VerificationResult[]>([]);
+  // Store all aggregated sources or per-result? For simplicity, we track the latest analysis sources globally or handle them in the result object.
+  // The VerificationResult interface doesn't strictly have sources (extracted separately in analyzeContent).
+  // We need to map sources to each result index.
+  const [resultsSources, setResultsSources] = useState<Source[][]>([]);
   
   // UI States
-  const [showChat, setShowChat] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
 
-  // Chat States
+  // Chat/Follow-up States
   const [chatSession, setChatSession] = useState<Chat | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
+  const [followUpInput, setFollowUpInput] = useState('');
+  const [isFollowingUp, setIsFollowingUp] = useState(false);
 
   // Data Persistence States
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -364,11 +495,11 @@ const App = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
   const dragCounter = useRef(0);
   const urlInputRef = useRef<HTMLInputElement>(null);
+  const endOfResultsRef = useRef<HTMLDivElement>(null);
 
   const t = TRANSLATIONS[language];
 
@@ -411,9 +542,12 @@ const App = () => {
     }
   }, [stage === 'scanning']);
 
+  // Scroll to bottom when results change
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages, showChat]);
+    if (endOfResultsRef.current && results.length > 0) {
+        endOfResultsRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [results, isFollowingUp]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -436,7 +570,6 @@ const App = () => {
       if (parsed.date === today) {
         usage = parsed;
       } else {
-        // Reset if date changed
         localStorage.setItem(STORAGE_USAGE_KEY, JSON.stringify(usage));
       }
     }
@@ -472,7 +605,7 @@ const App = () => {
       previewText: preview || "Media Analysis",
       sources: sourcesList
     };
-    const newHistory = [newItem, ...history].slice(0, 50); // Limit to 50 items
+    const newHistory = [newItem, ...history].slice(0, 50);
     setHistory(newHistory);
     localStorage.setItem(STORAGE_HISTORY_KEY, JSON.stringify(newHistory));
   };
@@ -485,11 +618,17 @@ const App = () => {
   };
 
   const loadHistoryItem = (item: HistoryItem) => {
-    setResult(item.result);
-    setSources(item.sources);
+    // When loading history, we only restore the initial state
+    setResults([item.result]);
+    setResultsSources([item.sources]);
     setStage('complete');
     setShowHistory(false);
-    initializeChat(item.result);
+    
+    // We cannot easily restore a "live" chat session from a single history item unless we stored the full context.
+    // For now, we start a fresh session context based on the result so the user can continue asking questions.
+    // However, without the original prompt text in the chat history, the model might lack context.
+    // We will initialize the chat with the result as context.
+    initializeChatWithContext(item.result);
   };
 
   // --- Handlers ---
@@ -500,7 +639,7 @@ const App = () => {
   };
 
   const processFile = (file: File) => {
-    if (file.size > 10 * 1024 * 1024) { // Increased to 10MB
+    if (file.size > 10 * 1024 * 1024) {
       setError(t.errorMediaSize);
       return;
     }
@@ -662,10 +801,9 @@ const App = () => {
 
     setStage('scanning');
     setError(null);
-    setResult(null);
-    setSources([]);
-    setShowChat(false);
-    setDynamicSteps(null); // Reset dynamic steps
+    setResults([]); // Clear previous results
+    setResultsSources([]);
+    setDynamicSteps(null);
 
     // Fire and forget dynamic steps generation
     generateDynamicSteps(text, mediaFiles, urlInput, language);
@@ -698,35 +836,38 @@ const App = () => {
       const systemPrompt = `
         You are 'Veritas', an advanced digital forensic analyst specializing in Fraud & Misinformation Detection.
         
-        Analyze the input (URL, Text, Image, Audio, or Video) for the following threats:
+        Analyze the input (URL, Text, Image, Audio, or Video) or the User's question for threats:
         1. **Misinformation**: Fake News, Rumors, Conspiracy Theories.
         2. **Cyber Threats**: Phishing Emails, Scam Attempts, Social Engineering, Financial Fraud.
-        3. **Digital Manipulation**: Deepfakes (Video/Audio), AI-generated Images, Altered Documents.
+        3. **Digital Manipulation**: Deepfakes, AI-generated content.
         
-        If a URL is provided, you MUST fetch/search its content and use it as the primary evidence.
+        If a URL is provided, you MUST fetch/search its content and use it as evidence.
         
-        Strictly output JSON:
+        CRITICAL: ALL your responses must be strictly valid JSON matching this schema:
         {
-          "score": number, // 0-100 (100=Safe/True/Legitimate, 0=Fraud/Fake/Dangerous)
+          "score": number, // 0-100 (100=Safe/True, 0=Fraud/Fake)
           "verdict": "CREDIBLE" | "SUSPICIOUS" | "FAKE" | "SATIRE",
           "isAiGenerated": boolean,
           "aiConfidence": number,
           "aiReasoning": "1 sentence technical explanation about AI artifacts in ${languageName}",
-          "summary": "Concise executive summary of the threat level in ${languageName}. Reference specific details from the input.",
-          "extractedContent": "A brief summary (max 300 chars) of the text content read from the URL or input to prove you analyzed it (in ${languageName}).",
+          "summary": "Concise executive summary in ${languageName}. Reference specific details.",
+          "extractedContent": "A brief summary (max 300 chars) of the text content analyzed (in ${languageName}).",
           "claims": [{ "text": "Key Point/Red Flag", "isFact": boolean, "assessment": "Concise analysis in ${languageName}" }]
         }
       `;
 
-      const response = await ai.models.generateContent({
+      // Start Chat Session for continuous analysis
+      const chat = ai.chats.create({
         model: 'gemini-3-pro-preview',
-        contents: { parts },
         config: {
           systemInstruction: systemPrompt,
           tools: [{ googleSearch: {} }],
           thinkingConfig: { thinkingBudget: 2048 }
         }
       });
+
+      // Send the initial analysis request
+      const response = await chat.sendMessage({ parts: parts });
 
       // Process Sources
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
@@ -735,7 +876,6 @@ const App = () => {
         .map((c: any) => ({ title: c.web?.title || 'Source', uri: c.web?.uri || '#' }));
       
       const uniqueSources = Array.from(new Map(extractedSources.map(s => [s.uri, s] as [string, Source])).values());
-      setSources(uniqueSources);
 
       // Extract JSON
       let rawText = response.text || "";
@@ -748,8 +888,9 @@ const App = () => {
         const preview = urlInput || text.slice(0, 60) + (text.length > 60 ? '...' : '') || (mediaFiles.length ? `Media: ${mediaFiles[0].type}` : 'Analysis');
         saveToHistory(parsed, preview, uniqueSources);
 
-        setResult(parsed);
-        initializeChat(parsed);
+        setResults([parsed]);
+        setResultsSources([uniqueSources]);
+        setChatSession(chat); // Save session for follow-ups
         setStage('complete');
       } else {
         throw new Error("Invalid format");
@@ -761,42 +902,79 @@ const App = () => {
     }
   };
 
-  const initializeChat = (res: VerificationResult) => {
-    if (!ai) return;
-    const chat = ai.chats.create({
-      model: 'gemini-3-pro-preview',
-      config: { systemInstruction: `You are Veritas Assistant. Help the user understand this forensic report about fraud/misinformation: ${JSON.stringify(res)}` }
-    });
-    setChatSession(chat);
-    setChatMessages([]);
+  const handleFollowUpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!followUpInput.trim() || !chatSession) return;
+    
+    const query = followUpInput;
+    setFollowUpInput('');
+    setIsFollowingUp(true);
+
+    try {
+        // Send the follow-up question to the existing chat session
+        const response = await chatSession.sendMessage({ text: query });
+
+        // Process new sources
+        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+        const extractedSources: Source[] = chunks
+            .filter((c: any) => c.web)
+            .map((c: any) => ({ title: c.web?.title || 'Source', uri: c.web?.uri || '#' }));
+        const uniqueSources = Array.from(new Map(extractedSources.map(s => [s.uri, s] as [string, Source])).values());
+
+        // Parse JSON
+        let rawText = response.text || "";
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]) as VerificationResult;
+            setResults(prev => [...prev, parsed]);
+            setResultsSources(prev => [...prev, uniqueSources]);
+        }
+    } catch (err) {
+        console.error("Follow-up failed", err);
+    } finally {
+        setIsFollowingUp(false);
+    }
   };
 
-  const handleChatSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim() || !chatSession) return;
-    const msg = chatInput;
-    setChatInput('');
-    setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
-    setChatLoading(true);
-    try {
-      const res = await chatSession.sendMessage({ message: msg });
-      setChatMessages(prev => [...prev, { role: 'model', text: res.text }]);
-    } catch {
-      setChatMessages(prev => [...prev, { role: 'model', text: "Error." }]);
-    } finally {
-      setChatLoading(false);
-    }
+  const initializeChatWithContext = (res: VerificationResult) => {
+      // Helper for history loading: creates a pseudo-session so follow-ups work.
+      // We start a new chat but system prompt is key.
+      if (!ai) return;
+      
+      const languageName = language === 'es' ? 'Spanish' : language === 'pt' ? 'Portuguese' : 'English';
+      const systemPrompt = `
+        You are 'Veritas', a forensic analyst.
+        The user is viewing a previous report: ${JSON.stringify(res)}.
+        
+        If the user asks a follow-up question, you MUST reply with a NEW valid JSON object in the exact same schema as before, analyzing the specific question or new claim they make.
+        
+        Schema:
+        { "score": number, "verdict": "CREDIBLE"|"SUSPICIOUS"|"FAKE"|"SATIRE", "isAiGenerated": boolean, "aiConfidence": number, "aiReasoning": string, "summary": string, "extractedContent": string, "claims": array }
+        
+        Language: ${languageName}.
+      `;
+
+      const chat = ai.chats.create({
+          model: 'gemini-3-pro-preview',
+          config: { 
+              systemInstruction: systemPrompt, 
+              tools: [{googleSearch: {}}] 
+          }
+      });
+      setChatSession(chat);
   };
 
   const reset = () => {
     setStage('idle');
-    setResult(null);
+    setResults([]);
+    setResultsSources([]);
     setText('');
     setUrlInput('');
     setShowUrlInput(false);
     setMediaFiles([]);
-    setShowChat(false);
     setDynamicSteps(null);
+    setChatSession(null);
     dragCounter.current = 0;
   };
 
@@ -846,16 +1024,6 @@ const App = () => {
     }
     if (hasFile) {
         e.preventDefault();
-    }
-  };
-
-  const getStatusColor = (verdict: string) => {
-    switch (verdict) {
-      case 'CREDIBLE': return 'border-emerald-500 text-emerald-700';
-      case 'SUSPICIOUS': return 'border-amber-500 text-amber-700';
-      case 'FAKE': return 'border-rose-500 text-rose-700';
-      case 'SATIRE': return 'border-violet-500 text-violet-700';
-      default: return 'border-gray-500 text-gray-700';
     }
   };
 
@@ -964,213 +1132,88 @@ const App = () => {
            <BookLoader label={getLoadingLabel(stage)} />
         )}
 
-        {/* RESULT STAGE */}
-        {stage === 'complete' && result && (
+        {/* RESULT STAGE (Iterate over multiple results) */}
+        {stage === 'complete' && (
            <div className="animate-fade-in py-8">
+              
               {/* Controls */}
               <div className="flex justify-between items-center mb-8 no-print">
                  <button onClick={reset} className="flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-black transition-colors bg-white px-4 py-2 rounded-full border border-transparent hover:border-gray-200 shadow-sm">
                     <RefreshCcw size={14} /> {t.newSearch}
                  </button>
-                 <div className="flex gap-3">
-                     <button onClick={() => window.print()} className="p-2 text-gray-500 hover:text-black hover:bg-white rounded-full transition-all"><Printer size={20} /></button>
-                     <button onClick={() => setShowChat(!showChat)} className={`p-2 transition-all rounded-full hover:bg-white ${showChat ? 'text-black bg-white shadow-sm' : 'text-gray-500 hover:text-black'}`}><MessageSquare size={20} /></button>
-                 </div>
+                 <button onClick={() => window.print()} className="p-2 text-gray-500 hover:text-black hover:bg-white rounded-full transition-all"><Printer size={20} /></button>
               </div>
 
-              {/* Main Report Sheet */}
-              <div className="bg-[#F5F5F7] p-8 md:p-16 shadow-2xl shadow-gray-300/50 min-h-[800px] relative border-t-[6px] border-black">
-                 
-                 {/* 1. INPUT CONTEXT SUMMARY (New Section) */}
-                 <div className="mb-12 border-b-2 border-gray-200 pb-8">
-                    <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
-                       <FileQuestion size={14} /> {t.inputSummaryTitle}
-                    </h3>
-                    <div className="flex flex-col gap-6">
-                        {/* URL Summary */}
-                        {urlInput && (
-                            <div className="flex items-start gap-4 p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
-                                <div className="p-2 bg-gray-100 rounded-full text-gray-500"><Link size={18}/></div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">{t.originalUrl}</p>
-                                    <a href={urlInput} target="_blank" className="text-sm text-blue-600 hover:underline truncate block">{urlInput}</a>
-                                </div>
-                            </div>
-                        )}
-                        
-                        {/* Text Snippet Summary */}
-                        {text && (
-                            <div className="flex items-start gap-4 p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
-                                <div className="p-2 bg-gray-100 rounded-full text-gray-500"><Quote size={18}/></div>
-                                <div className="flex-1">
-                                    <p className="text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">{t.originalText}</p>
-                                    <p className="text-sm text-gray-700 italic font-serif leading-relaxed line-clamp-3">"{text}"</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Media Files Grid */}
-                        {mediaFiles.length > 0 && (
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                {mediaFiles.map((f, i) => (
-                                    <div key={i} className="relative aspect-square bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm flex items-center justify-center">
-                                        {f.type === 'video' && <Video size={24} className="text-gray-400" />}
-                                        {f.type === 'audio' && <AudioLines size={24} className="text-gray-400" />}
-                                        {f.type === 'image' && <img src={`data:${f.mimeType};base64,${f.data}`} className="w-full h-full object-cover" />}
-                                        <div className="absolute bottom-2 right-2 bg-black text-white text-[10px] font-mono px-1.5 py-0.5 rounded uppercase">{f.type}</div>
+              {/* RENDER ALL RESULTS IN SEQUENCE */}
+              {results.map((res, index) => {
+                  const resultSources = resultsSources[index] || [];
+                  
+                  // Construct Input Summary only for the first item
+                  let inputContext: React.ReactNode = null;
+                  if (index === 0) {
+                      inputContext = (
+                        <>
+                            {urlInput && (
+                                <div className="flex items-start gap-4 p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                                    <div className="p-2 bg-gray-100 rounded-full text-gray-500"><Link size={18}/></div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">{t.originalUrl}</p>
+                                        <a href={urlInput} target="_blank" className="text-sm text-blue-600 hover:underline truncate block">{urlInput}</a>
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                 </div>
-
-                 {/* 2. HEADER & VERDICT WITH NEW SCORE METER */}
-                 <div className="flex flex-col md:flex-row gap-12 border-b-2 border-black pb-12 mb-12">
-                    <div className="flex-1">
-                       <div className="flex items-center gap-3 mb-4">
-                          <Feather size={28} className="text-black" />
-                          <span className="serif text-3xl font-bold tracking-tight">Veritas</span>
-                       </div>
-                       <h2 className="font-mono text-xs font-bold text-gray-400 tracking-[0.2em] uppercase mb-4">{t.reportHeader}</h2>
-                       <div className="flex items-center gap-3">
-                          {result.verdict === 'CREDIBLE' ? <ShieldCheck size={32} className="text-emerald-600" /> : 
-                           result.verdict === 'FAKE' ? <AlertTriangle size={32} className="text-rose-600" /> : <Info size={32} className="text-amber-600" />}
-                          <span className={`text-4xl font-serif font-bold ${getStatusColor(result.verdict).split(' ')[1]}`}>
-                             {t.verdictLabels[result.verdict]}
-                          </span>
-                       </div>
-                    </div>
-                    <div className="flex-1 flex items-end">
-                       <ScoreMeter score={result.score} t={t} />
-                    </div>
-                 </div>
-                 
-                 {/* 3. VERDICT SUMMARY */}
-                 <div className="mb-12 bg-white p-8 border-l-4 border-black shadow-sm">
-                     <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-gray-500 mb-3">{t.summary}</h3>
-                     <p className="font-serif text-xl leading-relaxed italic text-gray-800">
-                        "{result.summary}"
-                     </p>
-                 </div>
-
-                 {/* 4. EXTRACTED CONTENT (If any) */}
-                 {result.extractedContent && (
-                   <div className="mb-12">
-                      <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-gray-500 mb-4 flex items-center gap-2"><FileText size={14}/> {t.analyzedContent}</h3>
-                      <div className="bg-gray-50 border border-gray-200 p-6 rounded-md">
-                          <p className="font-serif italic text-gray-600 leading-relaxed text-sm">
-                            ...{result.extractedContent}...
-                          </p>
-                      </div>
-                   </div>
-                 )}
-
-                 {/* 5. TWO COLUMN DETAILS */}
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-16">
-                    {/* Claims */}
-                    <div>
-                       <h4 className="font-mono text-xs font-bold uppercase tracking-widest border-b-2 border-gray-900 pb-3 mb-6 text-black">{t.claims}</h4>
-                       <div className="space-y-6">
-                          {result.claims.map((claim, idx) => (
-                             <div key={idx} className="group">
-                                <div className="flex items-start gap-3 mb-2">
-                                   <div className={`mt-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${claim.isFact ? 'bg-emerald-500' : 'bg-rose-500'}`}>
-                                      {claim.isFact ? <Check size={10} /> : <X size={10} />}
-                                   </div>
-                                   <p className="font-medium text-gray-900 leading-snug">{claim.text}</p>
                                 </div>
-                                <p className="text-sm text-gray-500 pl-8 leading-relaxed group-hover:text-gray-900 transition-colors">{claim.assessment}</p>
-                             </div>
-                          ))}
-                       </div>
-                    </div>
-                    {/* AI & Sources */}
-                    <div className="space-y-12">
-                       <div>
-                          <h4 className="font-mono text-xs font-bold uppercase tracking-widest border-b-2 border-gray-900 pb-3 mb-6 text-black">Análisis Técnico IA</h4>
-                          <div className="bg-white p-5 border border-gray-200 shadow-sm rounded-lg">
-                            <div className="flex items-center justify-between mb-3">
-                               <div className="flex items-center gap-2">
-                                  <Sparkles size={16} className={result.isAiGenerated ? 'text-rose-500' : 'text-emerald-500'} />
-                                  <span className="text-lg font-bold font-serif">{result.isAiGenerated ? t.aiDetected : t.aiClean}</span>
-                               </div>
-                               {result.isAiGenerated && <span className="font-mono text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded font-bold">Probabilidad: {result.aiConfidence}%</span>}
-                            </div>
-                            <p className="text-sm text-gray-600 leading-relaxed border-t border-gray-100 pt-3">{result.aiReasoning}</p>
-                          </div>
-                       </div>
-                       <div>
-                          <h4 className="font-mono text-xs font-bold uppercase tracking-widest border-b-2 border-gray-900 pb-3 mb-6 text-black">{t.sources}</h4>
-                          <ul className="space-y-3">
-                             {sources.map((s, i) => (
-                                <li key={i}>
-                                   <a href={s.uri} target="_blank" rel="noreferrer" className="flex items-center gap-3 group bg-white p-3 border border-transparent hover:border-gray-200 hover:shadow-sm transition-all rounded-lg">
-                                      <div className="w-6 h-6 bg-gray-100 flex items-center justify-center rounded-full text-gray-400 group-hover:bg-black group-hover:text-white transition-colors">
-                                        <ArrowRight size={10} />
-                                      </div>
-                                      <span className="text-sm text-gray-600 group-hover:text-black font-medium truncate flex-1">{s.title}</span>
-                                      <ExternalLink size={12} className="text-gray-300 opacity-0 group-hover:opacity-100" />
-                                   </a>
-                                </li>
-                             ))}
-                             {sources.length === 0 && <li className="text-sm text-gray-400 italic">No public sources found.</li>}
-                          </ul>
-                       </div>
-                    </div>
-                 </div>
+                            )}
+                            {text && (
+                                <div className="flex items-start gap-4 p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                                    <div className="p-2 bg-gray-100 rounded-full text-gray-500"><Quote size={18}/></div>
+                                    <div className="flex-1">
+                                        <p className="text-[10px] font-mono uppercase text-gray-400 font-bold mb-1">{t.originalText}</p>
+                                        <p className="text-sm text-gray-700 italic font-serif leading-relaxed line-clamp-3">"{text}"</p>
+                                    </div>
+                                </div>
+                            )}
+                            {mediaFiles.length > 0 && (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {mediaFiles.map((f, i) => (
+                                        <div key={i} className="relative aspect-square bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm flex items-center justify-center">
+                                            {f.type === 'video' && <Video size={24} className="text-gray-400" />}
+                                            {f.type === 'audio' && <AudioLines size={24} className="text-gray-400" />}
+                                            {f.type === 'image' && <img src={`data:${f.mimeType};base64,${f.data}`} className="w-full h-full object-cover" />}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                      );
+                  }
 
-                 {/* Footer of Report */}
-                 <div className="pt-8 border-t border-gray-200 flex justify-between items-center text-[10px] text-gray-400 font-mono uppercase tracking-widest">
-                    <span className="flex items-center gap-2"><Fingerprint size={12} /> Generated by Veritas AI</span>
-                    <span>Ref: {Math.random().toString(36).substr(2, 9).toUpperCase()}</span>
-                 </div>
-              </div>
+                  return (
+                      <ResultCard 
+                        key={index} 
+                        result={res} 
+                        sources={resultSources} 
+                        t={t} 
+                        isFirst={index === 0}
+                        inputContext={inputContext}
+                      />
+                  );
+              })}
 
-              {/* Chat Overlay for Results */}
-              {showChat && (
-                 <div className="fixed bottom-0 right-0 w-full md:w-[420px] bg-[#F5F5F7] border-t md:border border-gray-200 shadow-2xl z-50 animate-fade-in-up h-[600px] flex flex-col md:rounded-tl-xl md:right-8 md:bottom-0">
-                    <div className="p-4 border-b border-gray-200 bg-white md:rounded-tl-xl flex justify-between items-center shadow-sm relative z-10">
-                       <span className="font-serif font-bold text-lg flex items-center gap-2"><Bot size={18} /> Asistente Veritas</span>
-                       <button onClick={() => setShowChat(false)} className="hover:bg-gray-100 p-1 rounded-full"><X size={18} className="text-gray-500" /></button>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-[#FDFBF7]">
-                       {chatMessages.map((m, i) => (
-                          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                             <div className={`max-w-[85%] p-4 rounded-xl text-sm leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-black text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none'}`}>
-                                {m.text}
-                             </div>
-                          </div>
-                       ))}
-                       {chatLoading && (
-                         <div className="flex justify-start">
-                           <div className="bg-white border border-gray-200 p-4 rounded-xl rounded-bl-none shadow-sm flex items-center gap-2">
-                              <Loader2 size={14} className="animate-spin" /> <span className="text-xs text-gray-500">Analizando...</span>
-                           </div>
-                         </div>
-                       )}
-                       <div ref={chatEndRef} />
-                    </div>
-                    <form onSubmit={handleChatSubmit} className="p-4 border-t border-gray-200 bg-white">
-                       <div className="relative">
-                          <input 
-                             className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-4 pr-12 py-4 text-sm focus:ring-2 focus:ring-black/5 focus:border-black focus:outline-none transition-all placeholder:text-gray-400"
-                             placeholder="Haga una pregunta sobre el reporte..."
-                             value={chatInput}
-                             onChange={(e) => setChatInput(e.target.value)}
-                          />
-                          <button type="submit" disabled={!chatInput.trim() || chatLoading} className="absolute right-3 top-3 p-1.5 bg-black text-white rounded-md hover:bg-gray-800 disabled:opacity-50 transition-colors">
-                             <ArrowRight size={16} />
-                          </button>
-                       </div>
-                    </form>
+              {/* Loading indicator for follow-up */}
+              {isFollowingUp && (
+                 <div className="flex justify-center py-8">
+                     <div className="bg-white border border-gray-200 px-6 py-4 rounded-full shadow-sm flex items-center gap-3 animate-pulse">
+                         <Loader2 size={18} className="animate-spin text-black" />
+                         <span className="font-mono text-xs uppercase tracking-widest text-gray-500">{t.followUpLoading}</span>
+                     </div>
                  </div>
               )}
+              
+              <div ref={endOfResultsRef} />
            </div>
         )}
       </main>
 
-      {/* FIXED BOTTOM INPUT BAR (Only in Idle State) */}
+      {/* FIXED BOTTOM INPUT BAR (Only in Idle State for Initial Search) */}
       {stage === 'idle' && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#FDFBF7] via-[#FDFBF7] to-transparent z-40">
            <div className="max-w-5xl mx-auto relative bg-white border border-gray-200 shadow-2xl rounded-2xl p-2 md:p-3 transition-all duration-300 focus-within:ring-2 focus-within:ring-black/5 focus-within:border-black/20" ref={inputContainerRef}>
@@ -1266,6 +1309,31 @@ const App = () => {
         </div>
       )}
 
+      {/* FIXED FOLLOW-UP INPUT BAR (Only when results exist) */}
+      {stage === 'complete' && (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/95 backdrop-blur-md border-t border-gray-200 z-50">
+           <form onSubmit={handleFollowUpSubmit} className="max-w-4xl mx-auto flex items-center gap-3">
+               <div className="relative flex-1">
+                 <input 
+                    type="text"
+                    value={followUpInput}
+                    onChange={(e) => setFollowUpInput(e.target.value)}
+                    placeholder={t.followUpPlaceholder}
+                    className="w-full bg-gray-100 border border-transparent focus:bg-white focus:border-black/20 rounded-full pl-5 pr-12 py-4 text-sm focus:ring-2 focus:ring-black/5 outline-none transition-all placeholder:text-gray-400"
+                    disabled={isFollowingUp}
+                 />
+                 <button 
+                    type="submit" 
+                    disabled={!followUpInput.trim() || isFollowingUp}
+                    className="absolute right-2 top-2 p-2 bg-black text-white rounded-full hover:bg-gray-800 disabled:opacity-50 disabled:bg-gray-400 transition-colors"
+                 >
+                    {isFollowingUp ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                 </button>
+               </div>
+           </form>
+        </div>
+      )}
+
       {/* History Slide-over */}
       {showHistory && (
         <div className="fixed inset-0 z-50 flex justify-end">
@@ -1290,7 +1358,7 @@ const App = () => {
                     {history.map(item => (
                         <div key={item.id} onClick={() => loadHistoryItem(item)} className="group cursor-pointer bg-white border border-gray-200 p-4 rounded-xl shadow-sm hover:shadow-md hover:border-black transition-all">
                             <div className="flex justify-between items-start mb-2">
-                                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${getStatusColor(item.result.verdict).replace('text-', 'bg-').replace('700', '100').replace('border-', '')} text-black`}>
+                                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${item.result.verdict === 'CREDIBLE' ? 'bg-emerald-100 text-emerald-700' : item.result.verdict === 'FAKE' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
                                     {t.verdictLabels[item.result.verdict]}
                                 </span>
                                 <span className="text-xs text-gray-400 font-mono">{new Date(item.timestamp).toLocaleDateString()}</span>
