@@ -856,7 +856,7 @@ const App = () => {
       });
 
       // Send the initial analysis request
-      const response = await chat.sendMessage({ parts: parts });
+      const response = await chat.sendMessage({ message: parts });
 
       // Process Sources
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
@@ -901,7 +901,7 @@ const App = () => {
 
     try {
         // Send the follow-up question to the existing chat session
-        const response = await chatSession.sendMessage({ text: query });
+        const response = await chatSession.sendMessage({ message: query });
 
         // Process new sources
         const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
